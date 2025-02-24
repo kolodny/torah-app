@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: '23'
 
-      - name: Custom sparse checkout
+      - name: checkout torah
         run: |
           rm -rf app || true
           git clone https://github.com/kolodny/torah.git
@@ -32,3 +32,4 @@ jobs:
           git config --global user.email "actions@github.com"
           git add .
           git commit -m "Deploy static site" || echo "No changes to commit"
+          git push origin main
