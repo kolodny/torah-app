@@ -22,7 +22,7 @@ jobs:
         run: |
           rm -rf app || true
           git clone https://github.com/kolodny/torah.git
-          cd torah
+          cd torah/
           npm install
           npm run build
           mv dist ../app
