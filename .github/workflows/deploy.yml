@@ -26,6 +26,17 @@ jobs:
           git clone https://github.com/kolodny/torah.git
           cd torah
           npm install
+
+          git clone --filter=blob:none --no-checkout https://github.com/Sivan22/otzaria-library.git
+          cd otzaria-library
+          git sparse-checkout init --cone
+          git sparse-checkout set links/ אוצריא/ 'books lists/ספריא/'
+          git checkout HEAD
+          cd ..
+
+          node ./scripts/build-db.ts
+          node ./scripts/slice-db.ts
+
           npm run build
           mv dist/* ..
           cd ..
