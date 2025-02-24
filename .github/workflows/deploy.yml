@@ -20,6 +20,7 @@ jobs:
 
       - name: checkout torah
         run: |
+          git fetch --all
           git checkout gh-pages
           rm -rf app || true
           git clone https://github.com/kolodny/torah.git
