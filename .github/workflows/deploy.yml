@@ -20,10 +20,15 @@ jobs:
 
       - name: Custom sparse checkout
         run: |
+          rm -rf app || true
           git clone https://github.com/kolodny/torah.git
           cd torah
           npm install
           npm run build
-          mv dist/* ..
+          mv dist ../app
           cd ..
           rm -rf torah
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add .
+          git commit -m "Deploy static site" || echo "No changes to commit"
