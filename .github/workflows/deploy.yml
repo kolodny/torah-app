@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: '23'
 
-      - name: checkout torah
+      - name: checkout torah repo
         run: |
           git fetch --all
           git checkout gh-pages
@@ -27,16 +27,25 @@ jobs:
           cd torah
           npm install
 
+      - name: checkout data repo
+        run: |
+          cd torah
+
           git clone --filter=blob:none --no-checkout https://github.com/Sivan22/otzaria-library.git
           cd otzaria-library
           git sparse-checkout init --cone
           git sparse-checkout set links/ אוצריא/ 'books lists/ספריא/'
           git checkout HEAD
-          cd ..
 
+      - name: build db
+        run: |
+          cd torah
           node ./scripts/build-db.ts
           node ./scripts/slice-db.ts
 
+      - name: push static site
+        run: |
+          cd torah
           npm run build
           mv dist/* ..
           cd ..
