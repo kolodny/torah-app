@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: '23'
 
-      - name: checkout torah repo
+      - name: Checkout torah repo
         run: |
           git checkout -b gh-pages
           rm -rf ./* || true
@@ -26,7 +26,7 @@ jobs:
           cd torah
           npm install
 
-      - name: checkout data repo
+      - name: Checkout data repo
         run: |
           cd torah
 
@@ -36,16 +36,24 @@ jobs:
           git sparse-checkout set links/ אוצריא/ 'books lists/ספריא/'
           git checkout HEAD
 
-      - name: build db
+      - name: Build db
         run: |
           cd torah
           node ./scripts/build-db.ts
+
+      - name: Split db
+        run: |
+          cd torah
           node ./scripts/slice-db.ts
 
-      - name: push static site
+      - name: Build static site
         run: |
           cd torah
           npm run build
+
+      - name: Push static site
+        run: |
+          cd torah
           mv dist/* ..
           cd ..
           rm -rf torah
