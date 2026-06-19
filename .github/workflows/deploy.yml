@@ -5,6 +5,10 @@
 # (Sefaria he+en, < 1 GB — see ingest/build-publish-master.ts in torah-llm), and deploys via the
 # GitHub Pages Actions artifact — so neither repo ever stores the GBs of SQLite in git.
 #
+# The corpus only changes when the sources or the ingest code change, so it's cached: an app-only push
+# is a cache hit and skips the ~22 min corpus build (deploys in ~2-3 min). A sources/ingest change misses
+# the cache and does the full rebuild, then re-caches.
+#
 # One-time setup: repo Settings → Pages → Build and deployment → Source = "GitHub Actions".
 
 name: Deploy to GitHub Pages
@@ -13,9 +17,8 @@ on:
   workflow_dispatch: {} # manual "Run workflow"
   schedule:
     - cron: '0 6 1 * *' # monthly (1st, 06:00 UTC) to pick up upstream source updates
-  # To rebuild whenever torah-llm changes, have torah-llm send a repository_dispatch here:
-  # repository_dispatch:
-  #   types: [torah-llm-updated]
+  repository_dispatch:
+    types: [torah-llm-updated] # fired by torah-llm's notify-publish workflow on push to main
 
 permissions:
   contents: read
@@ -30,13 +33,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # The full corpus (~9 GB raw + ~4 GB master) exceeds the runner's default free space; reclaim ~40 GB.
-      - name: Free up disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
-          df -h /
-
       - name: Checkout torah-llm (source of truth)
         uses: actions/checkout@v4
         with:
@@ -47,21 +43,40 @@ jobs:
         with:
           node-version: '22'
 
+      # The published corpus is fully determined by the pinned sources + the ingest code. Cache it so an
+      # app-only change reuses it instead of rebuilding (~22 min). Key changes → cache miss → full rebuild.
+      - name: Restore corpus cache
+        id: corpus
+        uses: actions/cache@v4
+        with:
+          path: torah-llm/public/db
+          key: corpus-${{ hashFiles('torah-llm/sources.lock.json', 'torah-llm/ingest/**', 'torah-llm/shared/**') }}
+
+      # Only needed for the full corpus build (~9 GB raw + ~4 GB master exceed the runner's free space).
+      - name: Free up disk space
+        if: steps.corpus.outputs.cache-hit != 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
       - name: Install dependencies
         working-directory: torah-llm
         run: npm ci
 
-      # Fetch the pinned sources and build the FULL master.sqlite (source of truth).
+      # Fetch the pinned sources and build the FULL master.sqlite (source of truth). [cache miss only]
       - name: Build corpus
+        if: steps.corpus.outputs.cache-hit != 'true'
         working-directory: torah-llm
         run: npm run data
 
-      # Derive the published subset (Sefaria he+en, excluded categories dropped) and slice it (< 1 GB).
+      # Derive + slice the published subset (Sefaria he+en, excluded categories dropped). [cache miss only]
       - name: Build published subset
+        if: steps.corpus.outputs.cache-hit != 'true'
         working-directory: torah-llm
         run: npm run publish:db
 
-      # Build the app at the project-page base path and assemble dist/ (app + dist/db).
+      # Build the app at the project-page base path and assemble dist/ (app + dist/db). [always]
       - name: Build site
         working-directory: torah-llm
         env:
