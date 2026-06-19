@@ -1,64 +1,92 @@
-name: Deploy Static Site
+# Publishes the torah-llm app to GitHub Pages.
+#
+# torah-llm is the source of truth (code + multi-source ingest pipeline). This repo only PUBLISHES:
+# it clones torah-llm, regenerates the corpus from the pinned sources, builds the published subset
+# (Sefaria he+en, < 1 GB — see ingest/build-publish-master.ts in torah-llm), and deploys via the
+# GitHub Pages Actions artifact — so neither repo ever stores the GBs of SQLite in git.
+#
+# One-time setup: repo Settings → Pages → Build and deployment → Source = "GitHub Actions".
+
+name: Deploy to GitHub Pages
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch: {} # manual "Run workflow"
+  schedule:
+    - cron: '0 6 1 * *' # monthly (1st, 06:00 UTC) to pick up upstream source updates
+  # To rebuild whenever torah-llm changes, have torah-llm send a repository_dispatch here:
+  # repository_dispatch:
+  #   types: [torah-llm-updated]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      # The full corpus (~9 GB raw + ~4 GB master) exceeds the runner's default free space; reclaim ~40 GB.
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - name: Checkout torah-llm (source of truth)
+        uses: actions/checkout@v4
         with:
-          node-version: '23'
+          repository: kolodny/torah-llm
+          path: torah-llm
 
-      - name: Checkout torah repo
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: torah-llm
+        run: npm ci
+
+      # Fetch the pinned sources and build the FULL master.sqlite (source of truth).
+      - name: Build corpus
+        working-directory: torah-llm
+        run: npm run data
+
+      # Derive the published subset (Sefaria he+en, excluded categories dropped) and slice it (< 1 GB).
+      - name: Build published subset
+        working-directory: torah-llm
+        run: npm run publish:db
+
+      # Build the app at the project-page base path and assemble dist/ (app + dist/db).
+      - name: Build site
+        working-directory: torah-llm
+        env:
+          PAGES_BASE: /torah-app/
         run: |
-          git checkout -b gh-pages
-          rm -rf ./* || true
-          git clone https://github.com/kolodny/torah.git
-          cd torah
-          npm install
-
-      - name: Checkout data repo
-        run: |
-          cd torah
-
-          git clone --filter=blob:none --no-checkout https://github.com/Sefaria/Sefaria-Export.git
-          cd Sefaria-Export
-          git sparse-checkout init --cone
-          git sparse-checkout set json/ schemas/ links/ table_of_contents.json
-          git checkout HEAD
-
-      - name: Build db
-        run: |
-          cd torah
-          node ./scripts/build-db.ts
-
-      - name: Split db
-        run: |
-          cd torah
-          node ./scripts/slice-db.ts
-
-      - name: Build static site
-        run: |
-          cd torah
           npm run build
+          npm run build:db
+          cp dist/index.html dist/404.html   # SPA fallback insurance (routing is query-param, but harmless)
+          du -sh dist dist/db
 
-      - name: Push static site
-        run: |
-          cd torah
-          mv dist/* ..
-          cd ..
-          rm -rf torah
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          git add .
-          git commit -m "Deploy static site" || echo "No changes to commit"
-          git push origin HEAD -f
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: torah-llm/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
